@@ -221,7 +221,7 @@ How to use:<br>
 1. Upload a character image, removing background would be preferred.
 2. Enter a text prompt to describe what you hope the chracter does.
 3. Click the <b>Submit</b> button to begin customization.
-4. Share your custimized photo with your friends and enjoy! 😊
+4. Share your customized photo with your friends and enjoy! 😊
 """
 
 article = r"""
