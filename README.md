@@ -76,7 +76,15 @@ Once you have prepared all models, the folder tree should be like:
   ├── pipeline.py
   └── README.md
 ```
-
+## Setup
+```
+# Install uv 
+pip install uv
+# Sync the dependency with uv.lock
+uv sync
+# Test the app
+uv run app.py
+```
 
 ## Usage
 

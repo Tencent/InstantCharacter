@@ -1,0 +1,19 @@
+[project]
+name = "instantcharacter"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "accelerate>=1.6.0",
+    "diffusers>=0.33.1",
+    "einops>=0.8.1",
+    "gradio>=5.25.2",
+    "huggingface-hub>=0.30.2",
+    "numpy>=2.2.5",
+    "pillow>=11.2.1",
+    "protobuf>=6.30.2",
+    "sentencepiece>=0.2.0",
+    "timm>=1.0.15",
+    "transformers>=4.51.3",
+]
