@@ -23,10 +23,9 @@ Qinglin Lu <sup>1*</sup>
 <sup>✝</sup>tech lead · <sup>*</sup>corresponding authors
 
 <a href='https://instantcharacter.github.io/'><img src='https://img.shields.io/badge/Project-Page-green'></a>
-<a href='https://xxxxx'><img src='https://img.shields.io/badge/Technique-Report-red'></a>
+<a href='https://arxiv.org/abs/2504.12395'><img src='https://img.shields.io/badge/Technique-Report-red'></a>
 <a href='https://huggingface.co/spaces/InstantX/InstantCharacter'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue'></a>
 <!-- [![GitHub](https://img.shields.io/github/stars/Instant/InstantCharacter?style=social)](https://github.com/Tencent/InstantCharacter) -->
-
 
 </div>
 
@@ -46,6 +45,7 @@ InstantCharacter is an innovative, tuning-free method designed to achieve charac
 
 ## Release
 
+- [2025/05/14] 🔥 Thanks to [Zeyu Long](https://github.com/Antinomy20001) for optimizing VRAM usage - now supports [offload-inference](./offload_infer_demo.py) under 22GB VRAM.
 - [2025/04/21] 🔥 Thanks to [jax-explorer](https://github.com/jax-explorer) for providing the [ComfyUI Wrapper](https://github.com/jax-explorer/ComfyUI-InstantCharacter).
 - [2025/04/18] 🔥 We release the [demo](https://huggingface.co/spaces/InstantX/InstantCharacter) [checkpoints](https://huggingface.co/InstantX/InstantCharacter/) and [code](https://github.com/Tencent/InstantCharacter).
 <!-- - [2025/04/02] 🔥 We release the [technical report](https://xxxxxxx/). -->

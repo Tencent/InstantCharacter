@@ -4,6 +4,7 @@
 from PIL import Image
 from einops import rearrange
 import torch
+from diffusers.pipelines.pipeline_utils import is_accelerate_available, is_accelerate_version
 from diffusers.pipelines.flux.pipeline_flux import *
 from transformers import SiglipVisionModel, SiglipImageProcessor, AutoModel, AutoImageProcessor
 from diffusers.image_processor import PipelineImageInput
@@ -31,6 +32,7 @@ EXAMPLE_DOC_STRING = """
 
 
 class InstantCharacterFluxPipeline(FluxPipeline):
+
 
     def check_inputs(
         self,
@@ -97,10 +99,13 @@ class InstantCharacterFluxPipeline(FluxPipeline):
             raise ValueError(
                 "If `negative_prompt_embeds` are provided, `negative_pooled_prompt_embeds` also have to be passed. Make sure to generate `negative_pooled_prompt_embeds` from the same text encoder that was used to generate `negative_prompt_embeds`."
             )
+    
 
         if max_sequence_length is not None and max_sequence_length > 512:
             raise ValueError(f"`max_sequence_length` cannot be greater than 512 but is {max_sequence_length}")
-            
+    
+    _exclude_layer_from_cpu_offload = []
+    
     @torch.inference_mode()
     def encode_siglip_image_emb(self, siglip_image, device, dtype):
         siglip_image = siglip_image.to(device, dtype=dtype)
@@ -176,16 +181,20 @@ class InstantCharacterFluxPipeline(FluxPipeline):
     def init_ccp_and_attn_processor(self, *args, **kwargs):
         subject_ip_adapter_path = kwargs['subject_ip_adapter_path']
         nb_token = kwargs['nb_token']
+        device=kwargs.get('nb_token', torch.device('cuda'))
+        
         state_dict = torch.load(subject_ip_adapter_path, map_location="cpu")
-        device, dtype = self.transformer.device, self.transformer.dtype
+        dtype = self.transformer.dtype
+
 
         print(f"=> init attn processor")
         attn_procs = {}
         for idx_attn, (name, v) in enumerate(self.transformer.attn_processors.items()):
-            attn_procs[name] = FluxIPAttnProcessor(
+            layer = FluxIPAttnProcessor(
                 hidden_size=self.transformer.config.attention_head_dim * self.transformer.config.num_attention_heads,
                 ip_hidden_states_dim=self.text_encoder_2.config.d_model,
             ).to(device, dtype=dtype)
+            attn_procs[name] = layer
         self.transformer.set_attn_processor(attn_procs)
         tmp_ip_layers = torch.nn.ModuleList(self.transformer.attn_processors.values())
         key_name = tmp_ip_layers.load_state_dict(state_dict["ip_adapter"], strict=False)
@@ -223,9 +232,10 @@ class InstantCharacterFluxPipeline(FluxPipeline):
         self, 
         image_encoder_path=None, 
         image_encoder_2_path=None, 
-        subject_ipadapter_cfg=None, 
+        subject_ipadapter_cfg=None,
+        device=torch.device('cuda')
     ):
-        device, dtype = self.transformer.device, self.transformer.dtype
+        dtype = self.transformer.dtype
 
         # image encoder
         print(f"=> loading image_encoder_1: {image_encoder_path}")
@@ -248,9 +258,10 @@ class InstantCharacterFluxPipeline(FluxPipeline):
         self.dino_image_processor_2 = image_processor_2
 
         # ccp and adapter
-        self.init_ccp_and_attn_processor(**subject_ipadapter_cfg)
+        self.init_ccp_and_attn_processor(**subject_ipadapter_cfg, device=device)
 
 
+    @torch.inference_mode()
     @torch.no_grad()
     @replace_example_docstring(EXAMPLE_DOC_STRING)
     def __call__(
@@ -616,3 +627,76 @@ class InstantCharacterFluxPipeline(FluxPipeline):
         flux_load_lora(self, lora_file_path, -lora_weight)
         return res
 
+    def enable_sequential_cpu_offload(self, gpu_id: Optional[int] = None, device: Union[torch.device, str] = "cuda"):
+        r"""
+        Offloads all models to CPU using 🤗 Accelerate, significantly reducing memory usage. When called, the state
+        dicts of all `torch.nn.Module` components (except those in `self._exclude_from_cpu_offload`) are saved to CPU
+        and then moved to `torch.device('meta')` and loaded to GPU only when their specific submodule has its `forward`
+        method called. Offloading happens on a submodule basis. Memory savings are higher than with
+        `enable_model_cpu_offload`, but performance is lower.
+
+        Arguments:
+            gpu_id (`int`, *optional*):
+                The ID of the accelerator that shall be used in inference. If not specified, it will default to 0.
+            device (`torch.Device` or `str`, *optional*, defaults to "cuda"):
+                The PyTorch device type of the accelerator that shall be used in inference. If not specified, it will
+                default to "cuda".
+        """
+        self._maybe_raise_error_if_group_offload_active(raise_error=True)
+
+        if is_accelerate_available() and is_accelerate_version(">=", "0.14.0"):
+            from accelerate import cpu_offload
+        else:
+            raise ImportError("`enable_sequential_cpu_offload` requires `accelerate v0.14.0` or higher")
+        self.remove_all_hooks()
+
+        is_pipeline_device_mapped = self.hf_device_map is not None and len(self.hf_device_map) > 1
+        if is_pipeline_device_mapped:
+            raise ValueError(
+                "It seems like you have activated a device mapping strategy on the pipeline so calling `enable_sequential_cpu_offload() isn't allowed. You can call `reset_device_map()` first and then call `enable_sequential_cpu_offload()`."
+            )
+
+        torch_device = torch.device(device)
+        device_index = torch_device.index
+
+        if gpu_id is not None and device_index is not None:
+            raise ValueError(
+                f"You have passed both `gpu_id`={gpu_id} and an index as part of the passed device `device`={device}"
+                f"Cannot pass both. Please make sure to either not define `gpu_id` or not pass the index as part of the device: `device`={torch_device.type}"
+            )
+
+        # _offload_gpu_id should be set to passed gpu_id (or id in passed `device`) or default to previously set id or default to 0
+        self._offload_gpu_id = gpu_id or torch_device.index or getattr(self, "_offload_gpu_id", 0)
+
+        device_type = torch_device.type
+        device = torch.device(f"{device_type}:{self._offload_gpu_id}")
+        self._offload_device = device
+
+        if self.device.type != "cpu":
+            self.to("cpu", silence_dtype_warnings=True)
+            device_mod = getattr(torch, self.device.type, None)
+            if hasattr(device_mod, "empty_cache") and device_mod.is_available():
+                device_mod.empty_cache()  # otherwise we don't see the memory savings (but they probably exist)
+
+        exclude_models = [module_name.split('.')[0] for module_name in self._exclude_layer_from_cpu_offload]
+
+        for name, model in self.components.items():
+            if not isinstance(model, torch.nn.Module):
+                continue
+            
+            if name in exclude_models:
+                for layer_name, layer in model.named_children():
+                    if '.'.join([name, layer_name]) in self._exclude_layer_from_cpu_offload:
+                        layer.to(device)
+                    else:
+                        offload_buffers = len(layer._parameters) > 0
+                        cpu_offload(layer, device, offload_buffers=offload_buffers)
+                continue
+
+            if name in self._exclude_from_cpu_offload:
+                model.to(device)
+            else:
+                # make sure to offload buffers if not all high level weights
+                # are of type nn.Module
+                offload_buffers = len(model._parameters) > 0
+                cpu_offload(model, device, offload_buffers=offload_buffers)
