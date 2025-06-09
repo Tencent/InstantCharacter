@@ -109,7 +109,7 @@ class InstantCharacterFluxPipeline(FluxPipeline):
     def init_ccp_and_attn_processor(self, *args, **kwargs):
         subject_ip_adapter_path = kwargs['subject_ip_adapter_path']
         nb_token = kwargs['nb_token']
-        device=kwargs.get('nb_token', torch.device('cuda'))
+        device=kwargs.get('device', torch.device('cuda'))
         
         state_dict = torch.load(subject_ip_adapter_path, map_location="cpu")
         dtype = self.transformer.dtype
